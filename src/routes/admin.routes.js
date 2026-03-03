@@ -5,12 +5,14 @@ import {
   getUserById, 
   updateUserRole, 
   updateUserStatus,
+  deleteUser,
   getSystemStats,
   getAllCategories,
   createCategory,
   updateCategory,
   deleteCategory,
-  getRecentActivity
+  getRecentActivity,
+  resetCollections
 } from '../controllers/admin.controller.js';
 
 const router = Router();
@@ -20,6 +22,7 @@ router.get('/users', auth(['admin']), getAllUsers);
 router.get('/users/:id', auth(['admin']), getUserById);
 router.put('/users/:id/role', auth(['admin']), updateUserRole);
 router.put('/users/:id/status', auth(['admin']), updateUserStatus);
+router.delete('/users/:id', auth(['admin']), deleteUser);
 
 // System Statistics Routes (Admin only)
 router.get('/stats', auth(['admin']), getSystemStats);
@@ -32,5 +35,8 @@ router.delete('/categories/:id', auth(['admin']), deleteCategory);
 
 // Activity Log Routes (Admin only)
 router.get('/activity', auth(['admin']), getRecentActivity);
+
+// Collections Reset Route (Admin only)
+router.delete('/reset-collections', auth(['admin']), resetCollections);
 
 export default router;

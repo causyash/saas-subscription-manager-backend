@@ -2,9 +2,6 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import ActivityLog from "../models/ActivityLog.js";
-import { sendOtpEmail } from "../lib/email.js";
-
-const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
 
 export async function register(req, res) {
   try {
@@ -14,27 +11,18 @@ export async function register(req, res) {
     const { name, email, password } = req.body;
     const existing = await User.findOne({ email });
     if (existing) {
-      if (existing.isVerified) {
-        return res.status(409).json({ message: "Email already in use" });
-      } else {
-        // User exists but not verified. We update their OTP and resend
-        const otp = generateOtp();
-        existing.otp = otp;
-        existing.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
-        existing.password = await bcrypt.hash(password, 10);
-        existing.name = name;
-        await existing.save();
-
-        await sendOtpEmail(email, otp);
-        return res.status(200).json({ email, message: "OTP resent for existing unverified account" });
-      }
+      return res.status(409).json({ message: "Email already in use" });
     }
 
     const hash = await bcrypt.hash(password, 10);
-    const otp = generateOtp();
-    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    const user = await User.create({ name, email, password: hash, role: "member", otp, otpExpiry });
+    const user = await User.create({ 
+      name, 
+      email, 
+      password: hash, 
+      role: "member", 
+      isVerified: true  // Skip OTP verification - set as verified automatically
+    });
 
     // Log registration activity
     await ActivityLog.create({
@@ -45,9 +33,17 @@ export async function register(req, res) {
       userAgent: req.get('User-Agent')
     });
 
-    await sendOtpEmail(email, otp);
+    // Automatically generate a token for the newly registered user
+    const token = jwt.sign(
+      { id: user._id, role: user.role, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
 
-    res.status(201).json({ email: user.email, message: "OTP sent to email" });
+    res.status(201).json({ 
+      token,
+      message: "User registered successfully" 
+    });
   } catch (e) {
     console.error('Registration error:', e);
     res.status(500).json({ message: "Server error" });
@@ -84,9 +80,7 @@ export async function login(req, res) {
     const ok = await bcrypt.compare(password, user.password);
     if (!ok) return res.status(401).json({ message: "Invalid credentials" });
 
-    if (!user.isVerified) {
-      return res.status(403).json({ message: "Please verify your email first", notVerified: true });
-    }
+    // Removed the email verification check to skip OTP verification
 
     // Update last login
     await User.findByIdAndUpdate(user._id, { lastLogin: new Date() });
@@ -113,60 +107,7 @@ export async function login(req, res) {
   }
 }
 
-export async function verifyOtp(req, res) {
-  try {
-    const { email, otp } = req.body;
-
-    const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    if (user.isVerified) {
-      return res.status(400).json({ message: "Email already verified" });
-    }
-
-    if (user.otp !== otp || user.otpExpiry < new Date()) {
-      return res.status(400).json({ message: "Invalid or expired OTP" });
-    }
-
-    user.isVerified = true;
-    user.otp = undefined;
-    user.otpExpiry = undefined;
-    await user.save();
-
-    const token = jwt.sign(
-      { id: user._id, role: user.role, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-
-    res.json({ token, message: "Email verified successfully" });
-  } catch (error) {
-    console.error("Verify OTP error:", error);
-    res.status(500).json({ message: "Server error" });
-  }
-}
-
-export async function resendOtp(req, res) {
-  try {
-    const { email } = req.body;
-    const user = await User.findOne({ email });
-
-    if (!user) return res.status(404).json({ message: "User not found" });
-    if (user.isVerified) return res.status(400).json({ message: "User already verified" });
-
-    const otp = generateOtp();
-    user.otp = otp;
-    user.otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-    await user.save();
-
-    await sendOtpEmail(email, otp);
-
-    res.json({ message: "OTP resent successfully" });
-  } catch (error) {
-    console.error("Resend OTP error:", error);
-    res.status(500).json({ message: "Server error" });
-  }
-}
+// Removed verifyOtp and resendOtp functions since we're skipping OTP verification
 
 export async function getProfile(req, res) {
   try {

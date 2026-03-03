@@ -1,60 +1,69 @@
 import User from '../models/User.js';
 import Subscription from '../models/Subscription.js';
-import Category from '../models/Category.js';
+import Payment from '../models/Payment.js';
 import ActivityLog from '../models/ActivityLog.js';
+import Category from '../models/Category.js';
+import logger from '../config/logger.js';
 
 // Get all users
-export async function getAllUsers(req, res) {
+export const getAllUsers = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search } = req.query;
+    const { page = 1, limit = 10, role, status, search } = req.query;
     
     const query = {};
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } }
-      ];
-    }
+    if (role) query.role = role;
+    if (status) query.status = status;
+    if (search) query.$or = [{ name: { $regex: search, $options: 'i' } }, { email: { $regex: search, $options: 'i' } }];
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
     
     const users = await User.find(query)
       .select('-password')
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
     
     const total = await User.countDocuments(query);
     
     res.json({
-      users,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
-      total
+      success: true,
+      data: users,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / parseInt(limit)),
+        totalItems: total,
+        hasNext: skip + users.length < total,
+        hasPrev: parseInt(page) > 1
+      }
     });
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching users', error: error.message });
+    logger.error('Error fetching users:', error);
+    res.status(500).json({ message: error.message });
   }
-}
+};
 
 // Get user by ID
-export async function getUserById(req, res) {
+export const getUserById = async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select('-password');
+    
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
-    res.json(user);
+    
+    res.json({ success: true, data: user });
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching user', error: error.message });
+    logger.error('Error fetching user:', error);
+    res.status(500).json({ message: error.message });
   }
-}
+};
 
 // Update user role
-export async function updateUserRole(req, res) {
+export const updateUserRole = async (req, res) => {
   try {
     const { role } = req.body;
-    const validRoles = ['admin', 'member', 'viewer'];
     
-    if (!validRoles.includes(role)) {
+    if (!['user', 'admin'].includes(role)) {
       return res.status(400).json({ message: 'Invalid role' });
     }
     
@@ -68,19 +77,19 @@ export async function updateUserRole(req, res) {
       return res.status(404).json({ message: 'User not found' });
     }
     
-    res.json(user);
+    res.json({ success: true, message: 'User role updated successfully', data: user });
   } catch (error) {
-    res.status(500).json({ message: 'Error updating user role', error: error.message });
+    logger.error('Error updating user role:', error);
+    res.status(500).json({ message: error.message });
   }
-}
+};
 
 // Update user status
-export async function updateUserStatus(req, res) {
+export const updateUserStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    const validStatuses = ['active', 'inactive', 'suspended'];
     
-    if (!validStatuses.includes(status)) {
+    if (!['active', 'inactive', 'suspended'].includes(status)) {
       return res.status(400).json({ message: 'Invalid status' });
     }
     
@@ -94,95 +103,113 @@ export async function updateUserStatus(req, res) {
       return res.status(404).json({ message: 'User not found' });
     }
     
-    res.json(user);
+    res.json({ success: true, message: 'User status updated successfully', data: user });
   } catch (error) {
-    res.status(500).json({ message: 'Error updating user status', error: error.message });
+    logger.error('Error updating user status:', error);
+    res.status(500).json({ message: error.message });
   }
-}
+};
+
+// Delete user
+export const deleteUser = async (req, res) => {
+  try {
+    const user = await User.findByIdAndDelete(req.params.id);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // Also delete user's subscriptions, payments, and activity logs
+    await Promise.all([
+      Subscription.deleteMany({ userId: req.params.id }),
+      Payment.deleteMany({ userId: req.params.id }),
+      ActivityLog.deleteMany({ userId: req.params.id })
+    ]);
+    
+    res.json({ success: true, message: 'User deleted successfully' });
+  } catch (error) {
+    logger.error('Error deleting user:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
 
 // Get system statistics
-export async function getSystemStats(req, res) {
+export const getSystemStats = async (req, res) => {
   try {
     const [
       totalUsers,
-      activeSubscriptions,
-      totalRevenue,
-      newUsersToday,
-      activeUsersToday
+      totalSubscriptions,
+      totalPayments,
+      totalActivityLogs
     ] = await Promise.all([
       User.countDocuments(),
-      Subscription.countDocuments({ status: 'Active' }),
-      Subscription.aggregate([
-        { $match: { status: 'Active' } },
-        { $group: { _id: null, total: { $sum: '$cost' } } }
-      ]).then(result => result[0]?.total || 0),
-      User.countDocuments({
-        createdAt: {
-          $gte: new Date(new Date().setHours(0, 0, 0, 0)),
-          $lt: new Date(new Date().setHours(23, 59, 59, 999))
-        }
-      }),
-      User.countDocuments({
-        lastLogin: {
-          $gte: new Date(new Date().setHours(0, 0, 0, 0)),
-          $lt: new Date(new Date().setHours(23, 59, 59, 999))
-        }
-      })
+      Subscription.countDocuments(),
+      Payment.countDocuments(),
+      ActivityLog.countDocuments()
     ]);
-
+    
     res.json({
-      totalUsers,
-      activeSubscriptions,
-      revenue: totalRevenue,
-      newUsers: newUsersToday,
-      activeUsers: activeUsersToday,
-      systemHealth: 'Operational'
+      success: true,
+      data: {
+        totalUsers,
+        totalSubscriptions,
+        totalPayments,
+        totalActivityLogs,
+        activeUsers: await User.countDocuments({ status: 'active' }),
+        adminUsers: await User.countDocuments({ role: 'admin' }),
+        todaySubscriptions: await Subscription.countDocuments({
+          createdAt: {
+            $gte: new Date(new Date().setHours(0, 0, 0, 0)),
+            $lt: new Date(new Date().setHours(23, 59, 59, 999))
+          }
+        })
+      }
     });
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching stats', error: error.message });
+    logger.error('Error fetching system stats:', error);
+    res.status(500).json({ message: error.message });
   }
-}
+};
 
 // Get all categories
-export async function getAllCategories(req, res) {
+export const getAllCategories = async (req, res) => {
   try {
-    const categories = await Category.find().sort({ name: 1 });
-    res.json(categories);
+    const categories = await Category.find({});
+    res.json({ success: true, data: categories });
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching categories', error: error.message });
+    logger.error('Error fetching categories:', error);
+    res.status(500).json({ message: error.message });
   }
-}
+};
 
 // Create category
-export async function createCategory(req, res) {
+export const createCategory = async (req, res) => {
   try {
-    const { name, color, icon } = req.body;
+    const { name, description } = req.body;
     
-    const existingCategory = await Category.findOne({ name: { $regex: new RegExp(`^${name}$`, 'i') } });
+    const existingCategory = await Category.findOne({ name: new RegExp(`^${name}$`, 'i') });
     if (existingCategory) {
-      return res.status(409).json({ message: 'Category already exists' });
+      return res.status(400).json({ message: 'Category already exists' });
     }
     
-    const category = await Category.create({
-      name,
-      color,
-      icon
-    });
+    const category = new Category({ name, description });
+    await category.save();
     
-    res.status(201).json(category);
+    res.status(201).json({ success: true, message: 'Category created successfully', data: category });
   } catch (error) {
-    res.status(500).json({ message: 'Error creating category', error: error.message });
+    logger.error('Error creating category:', error);
+    res.status(500).json({ message: error.message });
   }
-}
+};
 
 // Update category
-export async function updateCategory(req, res) {
+export const updateCategory = async (req, res) => {
   try {
-    const { name, color, icon } = req.body;
+    const { name, description } = req.body;
     
     const category = await Category.findByIdAndUpdate(
       req.params.id,
-      { name, color, icon },
+      { name, description },
       { new: true, runValidators: true }
     );
     
@@ -190,14 +217,15 @@ export async function updateCategory(req, res) {
       return res.status(404).json({ message: 'Category not found' });
     }
     
-    res.json(category);
+    res.json({ success: true, message: 'Category updated successfully', data: category });
   } catch (error) {
-    res.status(500).json({ message: 'Error updating category', error: error.message });
+    logger.error('Error updating category:', error);
+    res.status(500).json({ message: error.message });
   }
-}
+};
 
 // Delete category
-export async function deleteCategory(req, res) {
+export const deleteCategory = async (req, res) => {
   try {
     const category = await Category.findByIdAndDelete(req.params.id);
     
@@ -205,32 +233,83 @@ export async function deleteCategory(req, res) {
       return res.status(404).json({ message: 'Category not found' });
     }
     
-    res.json({ message: 'Category deleted successfully' });
+    res.json({ success: true, message: 'Category deleted successfully' });
   } catch (error) {
-    res.status(500).json({ message: 'Error deleting category', error: error.message });
+    logger.error('Error deleting category:', error);
+    res.status(500).json({ message: error.message });
   }
-}
+};
 
 // Get recent activity
-export async function getRecentActivity(req, res) {
+export const getRecentActivity = async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
     
-    const activities = await ActivityLog.find()
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const activityLogs = await ActivityLog.find({})
       .populate('userId', 'name email')
-      .sort({ timestamp: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
     
     const total = await ActivityLog.countDocuments();
     
     res.json({
-      activities,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
-      total
+      success: true,
+      data: activityLogs,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / parseInt(limit)),
+        totalItems: total,
+        hasNext: skip + activityLogs.length < total,
+        hasPrev: parseInt(page) > 1
+      }
     });
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching activity', error: error.message });
+    logger.error('Error fetching activity logs:', error);
+    res.status(500).json({ message: error.message });
   }
-}
+};
+
+// Reset all collections except users (Admin only)
+export const resetCollections = async (req, res) => {
+  try {
+    // Delete all documents from all collections except User
+    await Subscription.deleteMany({});
+    await Payment.deleteMany({});
+    await ActivityLog.deleteMany({});
+    await Category.deleteMany({});
+    
+    // Create default categories
+    const defaultCategories = [
+      { name: "Communication", description: "Messaging and communication tools" },
+      { name: "Meetings", description: "Video conferencing and meeting tools" },
+      { name: "Productivity", description: "Task management and productivity tools" },
+      { name: "Design", description: "Design and creative tools" },
+      { name: "Development", description: "Development tools and platforms" },
+      { name: "Marketing", description: "Marketing and promotion tools" },
+      { name: "Finance", description: "Financial and accounting tools" },
+      { name: "CRM", description: "Customer relationship management tools" },
+      { name: "Analytics", description: "Analytics and reporting tools" },
+      { name: "Security", description: "Security and protection tools" },
+      { name: "Cloud Storage", description: "Cloud storage and backup tools" },
+      { name: "Project Management", description: "Project planning and management tools" },
+      { name: "HR & Payroll", description: "Human resources and payroll tools" },
+      { name: "Accounting", description: "Accounting and bookkeeping tools" },
+      { name: "E-commerce", description: "E-commerce and online store tools" },
+      { name: "Other", description: "Other miscellaneous tools" }
+    ];
+    
+    await Category.insertMany(defaultCategories);
+    
+    res.json({ 
+      success: true, 
+      message: 'All collections reset successfully (except users)',
+      resetCollections: ['subscriptions', 'payments', 'activity_logs', 'categories']
+    });
+  } catch (error) {
+    logger.error('Error resetting collections:', error);
+    res.status(500).json({ message: error.message });
+  }
+};

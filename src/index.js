@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import connectDB from "./lib/db.js";
 import authRoutes from './routes/auth.routes.js';
 import adminRoutes from './routes/admin.routes.js';
+import subscriptionRoutes from './routes/subscription.routes.js';
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import morgan from "morgan";
@@ -33,6 +34,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
