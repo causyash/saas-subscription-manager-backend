@@ -18,14 +18,7 @@ const developmentLogger = winston.createLogger({
     logFormat
   ),
   transports: [
-    new winston.transports.Console(),
-    new winston.transports.File({
-      filename: 'logs/error.log',
-      level: 'error'
-    }),
-    new winston.transports.File({
-      filename: 'logs/combined.log'
-    })
+    new winston.transports.Console()
   ]
 });
 
@@ -38,17 +31,23 @@ const productionLogger = winston.createLogger({
     logFormat
   ),
   transports: [
-    new winston.transports.File({
-      filename: 'logs/error.log',
-      level: 'error'
-    }),
-    new winston.transports.File({
-      filename: 'logs/combined.log'
-    })
+    new winston.transports.Console()
   ]
 });
 
+const isServerless = !!process.env.VERCEL || !!process.env.AWS_REGION || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+
 // Export appropriate logger based on environment
-const logger = process.env.NODE_ENV === 'production' ? productionLogger : developmentLogger;
+const logger = isServerless
+  ? winston.createLogger({
+      level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+      format: combine(
+        timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+        errors({ stack: true }),
+        logFormat
+      ),
+      transports: [new winston.transports.Console()]
+    })
+  : (process.env.NODE_ENV === 'production' ? productionLogger : developmentLogger);
 
 export default logger;
