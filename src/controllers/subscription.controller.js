@@ -8,6 +8,9 @@ import logger from '../config/logger.js';
  */
 export const createSubscription = async (req, res) => {
   try {
+    console.log('Creating subscription, req.user:', req.user); // Debug log
+    console.log('Request body:', req.body); // Debug log
+    
     const { 
       softwareName, 
       category, 
@@ -44,6 +47,11 @@ export const createSubscription = async (req, res) => {
       return res.status(400).json({ message: 'Renewal date must be after start date' });
     }
 
+    // Check if req.user is available
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ message: 'User authentication required' });
+    }
+
     // Create subscription
     const subscription = new Subscription({
       userId: req.user._id,
@@ -58,15 +66,17 @@ export const createSubscription = async (req, res) => {
       notes
     });
 
+    console.log('Subscription object before saving:', subscription); // Debug log
+
     await subscription.save();
 
-    // Log activity
     await ActivityLog.create({
       userId: req.user._id,
-      action: 'CREATE_SUBSCRIPTION',
-      details: { subscriptionId: subscription._id, softwareName },
-      ip: req.ip,
-      userAgent: req.get('User-Agent')
+      type: 'subscription_add',
+      description: `Added subscription ${softwareName}`,
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent'),
+      metadata: { subscriptionId: subscription._id, softwareName }
     });
 
     res.status(201).json({
@@ -244,13 +254,13 @@ export const updateSubscription = async (req, res) => {
 
     await subscription.save();
 
-    // Log activity
     await ActivityLog.create({
       userId: req.user._id,
-      action: 'UPDATE_SUBSCRIPTION',
-      details: { subscriptionId: subscription._id, softwareName: subscription.softwareName },
-      ip: req.ip,
-      userAgent: req.get('User-Agent')
+      type: 'subscription_update',
+      description: `Updated subscription ${subscription.softwareName}`,
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent'),
+      metadata: { subscriptionId: subscription._id, softwareName: subscription.softwareName }
     });
 
     res.json({
@@ -283,13 +293,13 @@ export const deleteSubscription = async (req, res) => {
 
     await Subscription.findByIdAndDelete(id);
 
-    // Log activity
     await ActivityLog.create({
       userId: req.user._id,
-      action: 'DELETE_SUBSCRIPTION',
-      details: { subscriptionId: subscription._id, softwareName: subscription.softwareName },
-      ip: req.ip,
-      userAgent: req.get('User-Agent')
+      type: 'subscription_delete',
+      description: `Deleted subscription ${subscription.softwareName}`,
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent'),
+      metadata: { subscriptionId: subscription._id, softwareName: subscription.softwareName }
     });
 
     res.json({

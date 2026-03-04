@@ -13,16 +13,16 @@ const router = Router();
 
 // Subscription Management Routes
 router.route('/')
-  .post(auth(['user', 'admin']), createSubscription)
-  .get(auth(['user', 'admin']), getSubscriptions);
+  .post(auth(['member', 'admin']), createSubscription)
+  .get(auth(['member', 'admin']), getSubscriptions);
 
 // User's Subscriptions
-router.get('/user', auth(['user', 'admin']), getUserSubscriptions);
+router.get('/user', auth(['member', 'admin']), getUserSubscriptions);
 
 // Individual Subscription Routes
 router.route('/:id')
-  .get(auth(['user', 'admin']), getSubscriptionById)
-  .put(auth(['user', 'admin']), updateSubscription)
-  .delete(auth(['user', 'admin']), deleteSubscription);
+  .get(auth(['member', 'admin']), getSubscriptionById)
+  .put(auth(['member', 'admin']), updateSubscription)
+  .delete(auth(['member', 'admin']), deleteSubscription);
 
 export default router;
